@@ -75,6 +75,30 @@ def extrair_dados_ficha(texto_ficha):
 
     texto_ficha = texto_ficha.replace("\\", "/")
 
+    # ---------- FORMATO PIPE (agencia|conta|cnpj|razao|cpf|nome|telefone|usuario) ----------
+    partes = [p.strip() for p in texto_ficha.replace("\n", "").split("|")]
+    if len(partes) >= 6 and any(re.fullmatch(r"\d{14}", p) for p in partes):
+        for i, p in enumerate(partes):
+            # CNPJ (14 dígitos)
+            if re.fullmatch(r"\d{14}", p):
+                c = p
+                dados["CNPJ"] = f"{c[:2]}.{c[2:5]}.{c[5:8]}/{c[8:12]}-{c[12:]}"
+                # Razão Social costuma vir logo depois do CNPJ
+                if i + 1 < len(partes) and not re.fullmatch(r"[\d.\-/]+", partes[i + 1]):
+                    dados["Razão Social"] = partes[i + 1]
+            # CPF (11 dígitos)
+            elif re.fullmatch(r"\d{11}", p) and len(partes) > i and i > 0:
+                # pula se parecer telefone (termina em 0000-9999 range) — CPF vem antes do nome
+                if i + 1 < len(partes) and len(partes[i + 1].split()) >= 2:
+                    cpf = p
+                    dados["CPF Master"] = f"{cpf[:3]}.{cpf[3:6]}.{cpf[6:9]}-{cpf[9:]}"
+            # Usuário (letras+dígitos com maiúsculas tipo JMEM00025)
+            elif re.fullmatch(r"[A-Z]{2,}[A-Z0-9]*\d+", p) and not p.startswith("R$"):
+                if not dados["Usuário(s)"]:
+                    dados["Usuário(s)"] = p
+        dados["Situação"] = "ATIVA"
+        return dados
+
     # Razão Social
     match_empresa = re.search(r"Empresa[:\s]+([^\n]+)", texto_ficha, re.IGNORECASE)
     if match_empresa:
