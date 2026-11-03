@@ -60,21 +60,14 @@ st.markdown("<p class='subtext'>Escolha entre preencher manualmente ou colar os 
 # OPÇÃO DE ESCOLHA: COLAR OU MANUAL
 modo_entrada = st.radio("Selecione o modo de preenchimento:", ["Colar Ficha (Automático)", "Preencher Manualmente"], horizontal=True)
 
-# FUNÇÃO DE EXTRAÇÃO INTELIGENTE
+# FUNÇÃO DE EXTRAÇÃO INTELIGENTE (só os campos do PDF)
 def extrair_dados_ficha(texto_ficha):
     dados = {
         "Razão Social": "NÃO IDENTIFICADO",
         "CNPJ": "00.000.000/0000-00",
         "Situação": "ATIVA",
-        "Capital Social": "",
-        "E-mail": "",
-        "Agência / Conta": "",
-        "CPF Master": "000.000.000-00",
-        "Nome Sócio": "",
-        "Renda": "",
-        "Data de Nascimento": "",
+        "CPF Master": "",
         "Usuário(s)": "",
-        "Telefone GOV": "",
     }
 
     if not texto_ficha.strip():
@@ -82,66 +75,53 @@ def extrair_dados_ficha(texto_ficha):
 
     texto_ficha = texto_ficha.replace("\\", "/")
 
-    # ---------- FORMATO NOVO (Empresa / Capital social / Sócios) ----------
+    # Razão Social
     match_empresa = re.search(r"Empresa[:\s]+([^\n]+)", texto_ficha, re.IGNORECASE)
     if match_empresa:
         dados["Razão Social"] = match_empresa.group(1).strip()
+    else:
+        match_razao = re.search(r"RAZ[ÃA]O SOCIAL[:\s]+([^\n]+)", texto_ficha, re.IGNORECASE)
+        if match_razao:
+            dados["Razão Social"] = match_razao.group(1).strip()
+        else:
+            match_razao2 = re.search(r"\[\d+\|\d+-[0-9X]\]\s*-\s*\[\d+\]\s*-\s*\[([^\]]+)\]", texto_ficha)
+            if match_razao2:
+                dados["Razão Social"] = match_razao2.group(1).strip()
+            else:
+                match_nome = re.search(r"Nome:\s*([^|]+)", texto_ficha, re.IGNORECASE)
+                if match_nome:
+                    dados["Razão Social"] = match_nome.group(1).strip()
 
-    match_capital = re.search(r"Capital social[:\s]*R?\$?\s*([\d.,]+)", texto_ficha, re.IGNORECASE)
-    if match_capital:
-        dados["Capital Social"] = f"R$ {match_capital.group(1).strip()}"
+    # CNPJ
+    match_cnpj = re.search(r"CNPJ[:\s]+([\d./-]+)", texto_ficha, re.IGNORECASE)
+    if match_cnpj:
+        c_limpo = re.sub(r"\D", "", match_cnpj.group(1))
+        if len(c_limpo) == 14:
+            dados["CNPJ"] = f"{c_limpo[:2]}.{c_limpo[2:5]}.{c_limpo[5:8]}/{c_limpo[8:12]}-{c_limpo[12:]}"
+    if dados["CNPJ"] == "00.000.000/0000-00":
+        match_cnpj2 = re.search(r"\[(\d{14})\]", texto_ficha)
+        if not match_cnpj2:
+            match_cnpj2 = re.search(r"\b(\d{14})\b", texto_ficha)
+        if match_cnpj2:
+            c = match_cnpj2.group(1)
+            dados["CNPJ"] = f"{c[:2]}.{c[2:5]}.{c[5:8]}/{c[8:12]}-{c[12:]}"
 
-    match_situacao = re.search(r"Situa[çc][ãa]o cadastral[:\s]+([^\n]+)", texto_ficha, re.IGNORECASE)
-    if match_situacao:
-        dados["Situação"] = match_situacao.group(1).strip()
-
-    match_email = re.search(r"E-?mail[:\s]+([^\n]+)", texto_ficha, re.IGNORECASE)
-    if match_email:
-        dados["E-mail"] = match_email.group(1).strip()
-
-    match_agencia = re.search(r"Ag[êe]ncia[:\s]*(\d+)\s*/\s*Conta[:\s]*([\d-]+)", texto_ficha, re.IGNORECASE)
-    if match_agencia:
-        dados["Agência / Conta"] = f"{match_agencia.group(1).strip()} / {match_agencia.group(2).strip()}"
-
-    # Sócio completo (mesma linha com | )
-    match_socio = re.search(
-        r"CPF[:\s]*(\d{11})\s*\|\s*Nome[:\s]*([^|]+?)\s*\|\s*Renda[:\s]*R?\$?\s*([\d.,]+)\s*\|\s*Data de nascimento[:\s]*(\d{2}/\d{2}/\d{4})",
-        texto_ficha,
-        re.IGNORECASE,
-    )
-    if match_socio:
-        cpf = match_socio.group(1)
+    # CPF Master (sócio da ficha nova ou usuário master antiga)
+    match_cpf_socio = re.search(r"CPF[:\s]*(\d{11})", texto_ficha, re.IGNORECASE)
+    if match_cpf_socio:
+        cpf = match_cpf_socio.group(1)
         dados["CPF Master"] = f"{cpf[:3]}.{cpf[3:6]}.{cpf[6:9]}-{cpf[9:]}"
-        dados["Nome Sócio"] = match_socio.group(2).strip()
-        dados["Renda"] = f"R$ {match_socio.group(3).strip()}"
-        dados["Data de Nascimento"] = match_socio.group(4).strip()
+    else:
+        match_cpf_master = re.search(r"CPF USU[ÁA]RIO MASTER[:\s]+([\d.-]+)", texto_ficha, re.IGNORECASE)
+        if match_cpf_master:
+            cpf_limpo = re.sub(r"\D", "", match_cpf_master.group(1))
+            if len(cpf_limpo) == 11:
+                dados["CPF Master"] = f"{cpf_limpo[:3]}.{cpf_limpo[3:6]}.{cpf_limpo[6:9]}-{cpf_limpo[9:]}"
 
+    # Usuário(s)
     match_usuario = re.search(r"Usu[áa]rio[:\s]+([A-Za-z0-9]+)", texto_ficha, re.IGNORECASE)
     if match_usuario:
         dados["Usuário(s)"] = match_usuario.group(1).strip()
-
-    match_tel = re.search(r"Telefone GOV[:\s]*(\d{10,11})", texto_ficha, re.IGNORECASE)
-    if match_tel:
-        dados["Telefone GOV"] = match_tel.group(1).strip()
-
-    # ---------- FORMATOS ANTIGOS (compatibilidade) ----------
-    match_cnpj_rotulo = re.search(r"CNPJ[:\s]+([\d./-]+)", texto_ficha, re.IGNORECASE)
-    if match_cnpj_rotulo:
-        c_limpo = re.sub(r"\D", "", match_cnpj_rotulo.group(1))
-        if len(c_limpo) == 14:
-            dados["CNPJ"] = f"{c_limpo[:2]}.{c_limpo[2:5]}.{c_limpo[5:8]}/{c_limpo[8:12]}-{c_limpo[12:]}"
-
-    if dados["Razão Social"] == "NÃO IDENTIFICADO":
-        match_razao_rotulo = re.search(r"RAZ[ÃA]O SOCIAL[:\s]+([^\n]+)", texto_ficha, re.IGNORECASE)
-        if match_razao_rotulo:
-            dados["Razão Social"] = match_razao_rotulo.group(1).strip()
-
-    match_cpf_rotulo = re.search(r"CPF USU[ÁA]RIO MASTER[:\s]+([\d.-]+)", texto_ficha, re.IGNORECASE)
-    if match_cpf_rotulo and dados["CPF Master"] == "000.000.000-00":
-        cpf_limpo = re.sub(r"\D", "", match_cpf_rotulo.group(1))
-        if len(cpf_limpo) == 11:
-            dados["CPF Master"] = f"{cpf_limpo[:3]}.{cpf_limpo[3:6]}.{cpf_limpo[6:9]}-{cpf_limpo[9:]}"
-
     if not dados["Usuário(s)"]:
         matches_user = re.findall(r"USU[ÁA]RIOS?[:\s]+([A-Za-z0-9]+)", texto_ficha, re.IGNORECASE)
         for val_user in matches_user:
@@ -150,28 +130,8 @@ def extrair_dados_ficha(texto_ficha):
                 dados["Usuário(s)"] = val_user_limpo
                 break
 
-    if dados["CNPJ"] == "00.000.000/0000-00":
-        match_cnpj = re.search(r"\[(\d{14})\]", texto_ficha)
-        if not match_cnpj:
-            match_cnpj = re.search(r"\b(\d{14})\b", texto_ficha)
-        if match_cnpj:
-            c = match_cnpj.group(1)
-            dados["CNPJ"] = f"{c[:2]}.{c[2:5]}.{c[5:8]}/{c[8:12]}-{c[12:]}"
-
-    if dados["Razão Social"] == "NÃO IDENTIFICADO":
-        match_razao = re.search(r"\[\d+\|\d+-[0-9X]\]\s*-\s*\[\d+\]\s*-\s*\[([^\]]+)\]", texto_ficha)
-        if match_razao:
-            dados["Razão Social"] = match_razao.group(1).strip()
-        else:
-            match_nome = re.search(r"Nome:\s*([^|]+)", texto_ficha, re.IGNORECASE)
-            if match_nome:
-                dados["Razão Social"] = match_nome.group(1).strip()
-
-    if dados["CPF Master"] == "000.000.000-00":
-        match_cpf = re.search(r"CPF:\s*(\d{11})", texto_ficha, re.IGNORECASE)
-        if match_cpf:
-            cpf = match_cpf.group(1)
-            dados["CPF Master"] = f"{cpf[:3]}.{cpf[3:6]}.{cpf[6:9]}-{cpf[9:]}"
+    # Situação sempre ATIVA
+    dados["Situação"] = "ATIVA"
 
     return dados
 
@@ -289,10 +249,10 @@ def gerar_pdf(pasta_script, dados_empresa):
     
     tabela = []
     for k, v in dados_empresa.items():
-        if v is not None and str(v).strip():
+        if v is not None:
             tabela.append([Paragraph(f"<b>{k}:</b>", estilo_texto), Paragraph(str(v), estilo_texto)])
 
-    t = Table(tabela, colWidths=[135, 350])
+    t = Table(tabela, colWidths=[100, 385])
     t.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("BOTTOMPADDING", (0, 0), (-1, -1), 2), ("TOPPADDING", (0, 0), (-1, -1), 2)]))
     story.append(t)
     story.append(Spacer(1, 18))
@@ -338,15 +298,8 @@ dados_iniciais = {
     "Razão Social": "",
     "CNPJ": "",
     "Situação": "ATIVA",
-    "Capital Social": "",
-    "E-mail": "",
-    "Agência / Conta": "",
     "CPF Master": "",
-    "Nome Sócio": "",
-    "Renda": "",
-    "Data de Nascimento": "",
     "Usuário(s)": "",
-    "Telefone GOV": "",
 }
 
 if modo_entrada == "Colar Ficha (Automático)":
@@ -370,49 +323,19 @@ if 'dados_empresa' in st.session_state:
     with col1:
         razao_social = st.text_input("Razão Social", value=dados.get("Razão Social", ""))
         cnpj_val = st.text_input("CNPJ", value=dados.get("CNPJ", ""))
-        capital_val = st.text_input("Capital Social", value=dados.get("Capital Social", ""))
-        email_val = st.text_input("E-mail", value=dados.get("E-mail", ""))
-        agencia_val = st.text_input("Agência / Conta", value=dados.get("Agência / Conta", ""))
     with col2:
-        situacao = st.text_input("Situação", value=dados.get("Situação", "ATIVA"))
+        situacao = st.text_input("Situação", value="ATIVA")
         cpf_master = st.text_input("CPF Master", value=dados.get("CPF Master", ""))
-        nome_socio = st.text_input("Nome Sócio", value=dados.get("Nome Sócio", ""))
-        renda_val = st.text_input("Renda", value=dados.get("Renda", ""))
-        nascimento_val = st.text_input("Data de Nascimento", value=dados.get("Data de Nascimento", ""))
     
-    col_u1, col_u2 = st.columns([2, 2])
-    with col_u1:
-        usuario_val = st.text_input("Usuário(s)", value=dados.get("Usuário(s)", ""))
-        telefone_val = st.text_input("Telefone GOV", value=dados.get("Telefone GOV", ""))
-    with col_u2:
-        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True) # Alinhamento vertical
-        incluir_usuario = st.checkbox("Incluir Usuário no PDF", value=True)
-        incluir_socio = st.checkbox("Incluir Sócio/Renda/Nascimento no PDF", value=True)
+    usuario_val = st.text_input("Usuário(s)", value=dados.get("Usuário(s)", ""))
 
     dados_atualizados = {
         "Razão Social": razao_social,
         "CNPJ": cnpj_val,
-        "Situação": situacao,
+        "Situação": "ATIVA",
+        "CPF Master": cpf_master,
+        "Usuário(s)": usuario_val,
     }
-    if capital_val.strip():
-        dados_atualizados["Capital Social"] = capital_val
-    if email_val.strip():
-        dados_atualizados["E-mail"] = email_val
-    if agencia_val.strip():
-        dados_atualizados["Agência / Conta"] = agencia_val
-    if incluir_socio:
-        if cpf_master.strip():
-            dados_atualizados["CPF Master"] = cpf_master
-        if nome_socio.strip():
-            dados_atualizados["Nome Sócio"] = nome_socio
-        if renda_val.strip():
-            dados_atualizados["Renda"] = renda_val
-        if nascimento_val.strip():
-            dados_atualizados["Data de Nascimento"] = nascimento_val
-    if incluir_usuario and usuario_val.strip():
-        dados_atualizados["Usuário(s)"] = usuario_val
-    if telefone_val.strip():
-        dados_atualizados["Telefone GOV"] = telefone_val
 
     if st.button("Baixar PDF Pronto", type="primary"):
         if not razao_social.strip() or not cnpj_val.strip():
